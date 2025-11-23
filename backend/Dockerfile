@@ -10,7 +10,6 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
 RUN cargo install cargo-chef --locked
 COPY . .
-WORKDIR /app/backend
 RUN cargo chef prepare --recipe-path /app/recipe.json
 
 ############################
@@ -29,7 +28,7 @@ RUN cargo install cargo-chef --locked
 # Stage 2: Builder
 ############################
 FROM rust:1.90-slim-bookworm AS builder
-WORKDIR /app/backend
+WORKDIR /app
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -51,7 +50,7 @@ COPY --from=planner /app/recipe.json /app/recipe.json
 RUN cargo chef cook --release --recipe-path /app/recipe.json
 
 # Copy source code
-COPY . /app/backend
+COPY . /app
 
 # Set required environment variables
 ARG DATABASE_URL
@@ -95,10 +94,10 @@ RUN groupadd --system app && useradd --system --gid app --create-home app
 USER app
 
 # Copy only the binary
-COPY --from=builder /app/backend/target/release/backend ./backend
+COPY --from=builder /app/target/release/backend ./backend
 
 # Copy migrations (optional, useful for troubleshooting)
-COPY --from=builder /app/backend/migrations ./migrations
+COPY --from=builder /app/migrations ./migrations
 
 EXPOSE 8080
 CMD ["./backend"]
