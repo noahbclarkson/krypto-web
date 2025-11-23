@@ -4,12 +4,13 @@
 # Stage 0: Chef Planner
 ############################
 FROM rust:1.90-slim-bookworm AS planner
-WORKDIR /app/backend
+WORKDIR /app
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
 RUN cargo install cargo-chef --locked
 COPY . .
+WORKDIR /app/backend
 RUN cargo chef prepare --recipe-path /app/recipe.json
 
 ############################
