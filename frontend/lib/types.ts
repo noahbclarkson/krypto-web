@@ -27,9 +27,12 @@ export interface Session {
   interval: string;
   initial_capital: number;
   current_equity: number;
+  entry_equity?: number | null;
   current_position: number;
   entry_price: number | null;
   status: "active" | "stopped";
+  execution_mode?: string;
+  allocated_weight?: number;
   created_at: string;
   last_update: string;
 }

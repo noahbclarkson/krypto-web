@@ -45,6 +45,7 @@ pub struct Session {
     pub interval: String,
     pub initial_capital: f64,
     pub current_equity: f64,
+    pub entry_equity: Option<f64>,
     pub current_position: f64,
     pub entry_price: Option<f64>,
     pub status: String,

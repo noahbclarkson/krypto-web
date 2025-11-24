@@ -19,6 +19,7 @@ thiserror = "1.0"
 anyhow = "1.0"
 krypto = { git = "https://github.com/noahbclarkson/krypto", branch = "v2-rewrite" }
 binance = { package = "binance-rs-async", version = "1.3.3", features = ["margin_api"] }
+futures = "0.3"
 polars = { version = "0.37", features = ["lazy", "ndarray", "temporal", "serde", "dynamic_group_by", "abs", "diff", "pct_change", "rolling_window", "ewma", "round_series", "cross_join"] }
 rand = "0.8"
 env_logger = "0.11.8"

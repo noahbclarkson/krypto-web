@@ -21,14 +21,14 @@ export function SessionDetailsDialog({ session, isOpen, onClose }: Props) {
     queryKey: ["trades", session?.id],
     queryFn: () => api.getSessionTrades(session!.id),
     enabled: !!session,
-    refetchInterval: 2000
+    refetchInterval: 1000
   });
 
   const { data: equity } = useQuery({
     queryKey: ["equity", session?.id],
     queryFn: () => api.getEquityCurve(session!.id),
     enabled: !!session,
-    refetchInterval: 2000
+    refetchInterval: 1000
   });
 
   if (!session) return null;
@@ -56,7 +56,7 @@ export function SessionDetailsDialog({ session, isOpen, onClose }: Props) {
           <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
             <div className="text-slate-400 text-xs">Current Equity</div>
             <div className="text-2xl font-bold font-mono text-green-400">
-              ${session.current_equity.toFixed(2)}
+              ${session.current_equity.toFixed(4)}
             </div>
           </div>
           <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
@@ -129,10 +129,10 @@ export function SessionDetailsDialog({ session, isOpen, onClose }: Props) {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right font-mono text-slate-300">
-                        ${t.price.toFixed(2)}
+                        ${t.price.toFixed(4)}
                       </TableCell>
                       <TableCell className={`text-right font-mono ${(t.pnl || 0) > 0 ? "text-green-400" : (t.pnl || 0) < 0 ? "text-red-400" : "text-slate-500"}`}>
-                        {t.pnl ? `${t.pnl.toFixed(2)}` : "-"}
+                        {t.pnl ? `${t.pnl.toFixed(4)}` : "-"}
                       </TableCell>
                       <TableCell className="text-xs text-slate-500 max-w-[200px] truncate" title={t.reason || ""}>
                         {t.reason || "-"}

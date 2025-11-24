@@ -15,7 +15,7 @@ export function ActiveSessions() {
   const { data: sessions } = useQuery({
     queryKey: ["sessions"],
     queryFn: api.getSessions,
-    refetchInterval: 2000
+    refetchInterval: 1000
   });
 
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
@@ -51,10 +51,10 @@ export function ActiveSessions() {
                     <TableCell className="font-medium text-white">{s.symbol}</TableCell>
                     <TableCell className="text-slate-400">{s.interval}</TableCell>
                     <TableCell className="font-mono text-slate-200">
-                      ${s.current_equity.toFixed(2)}
+                      ${s.current_equity.toFixed(4)}
                     </TableCell>
                     <TableCell className={`font-mono ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)}
+                      {pnl >= 0 ? "+" : ""}{pnl.toFixed(4)}
                     </TableCell>
                     <TableCell>
                       <Badge variant={s.current_position > 0 ? "default" : s.current_position < 0 ? "destructive" : "secondary"}>

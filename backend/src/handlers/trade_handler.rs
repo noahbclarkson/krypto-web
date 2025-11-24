@@ -78,10 +78,12 @@ async fn delete_strategy(
     let strategy_id = path.into_inner();
     let mut tx = pool.begin().await?;
 
-    sqlx::query("DELETE FROM trades WHERE session_id IN (SELECT id FROM sessions WHERE strategy_id = $1)")
-        .bind(strategy_id)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "DELETE FROM trades WHERE session_id IN (SELECT id FROM sessions WHERE strategy_id = $1)",
+    )
+    .bind(strategy_id)
+    .execute(&mut *tx)
+    .await?;
 
     sqlx::query("DELETE FROM equity_snapshots WHERE session_id IN (SELECT id FROM sessions WHERE strategy_id = $1)")
         .bind(strategy_id)
@@ -108,15 +110,19 @@ async fn delete_strategy(
 }
 
 #[delete("/strategies")]
-async fn delete_all_strategies(
-    pool: web::Data<PgPool>
-) -> Result<impl Responder, AppError> {
+async fn delete_all_strategies(pool: web::Data<PgPool>) -> Result<impl Responder, AppError> {
     let mut tx = pool.begin().await?;
 
     sqlx::query("DELETE FROM trades").execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM equity_snapshots").execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM sessions").execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM strategies").execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM equity_snapshots")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM sessions")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM strategies")
+        .execute(&mut *tx)
+        .await?;
 
     tx.commit().await?;
 
@@ -166,10 +172,11 @@ async fn bulk_start_session(
     let mut created_count = 0;
 
     for strategy_id in ids {
-        if let Ok(strategy) = sqlx::query_as::<_, Strategy>("SELECT * FROM strategies WHERE id = $1")
-            .bind(strategy_id)
-            .fetch_one(pool.get_ref())
-            .await
+        if let Ok(strategy) =
+            sqlx::query_as::<_, Strategy>("SELECT * FROM strategies WHERE id = $1")
+                .bind(strategy_id)
+                .fetch_one(pool.get_ref())
+                .await
         {
             let _ = sqlx::query(
                 "INSERT INTO sessions (strategy_id, symbol, interval) VALUES ($1, $2, $3)",
@@ -308,12 +315,10 @@ async fn get_portfolio_history(
         bucket = bucket_expr
     );
 
-    let recs = sqlx::query_as::<_, PortfolioPoint>(
-        &sql,
-    )
-    .bind(range_days)
-    .fetch_all(pool.get_ref())
-    .await?;
+    let recs = sqlx::query_as::<_, PortfolioPoint>(&sql)
+        .bind(range_days)
+        .fetch_all(pool.get_ref())
+        .await?;
 
     Ok(HttpResponse::Ok().json(recs))
 }
