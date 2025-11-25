@@ -1,5 +1,5 @@
 import axios from "axios";
-import { Strategy, Session, Trade, EquitySnapshot, PortfolioPoint } from "./types";
+import { Strategy, Session, Trade, EquitySnapshot, PortfolioPoint, Candle } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -60,6 +60,11 @@ export const api = {
 
   getEquityCurve: async (id: string): Promise<EquitySnapshot[]> => {
     const res = await axios.get(`${API_URL}/sessions/${id}/equity`);
+    return res.data;
+  },
+
+  getSessionCandles: async (id: string): Promise<Candle[]> => {
+    const res = await axios.get(`${API_URL}/sessions/${id}/candles`);
     return res.data;
   },
 

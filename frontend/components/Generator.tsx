@@ -17,7 +17,7 @@ const AVAILABLE_INTERVALS = ["15m", "30m", "1h", "4h", "12h", "1d"];
 export function Generator() {
   const queryClient = useQueryClient();
 
-  const [symbolsInput, setSymbolsInput] = useState("BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT, ADAUSDT, DOGEUSDT, BNBUSDT, MATICUSDT");
+  const [symbolsInput, setSymbolsInput] = useState("BTCUSDT, ETHUSDT, SOLUSDT, DOGEUSDT, XRPUSDT, ADAUSDT, BNBUSDT, MATICUSDT, LINKUSDT, DOTUSDT");
   const [selectedIntervals, setSelectedIntervals] = useState<string[]>(["1h", "4h"]);
   const [historyLimit, setHistoryLimit] = useState([1000]);
   const [iterations, setIterations] = useState([50]);

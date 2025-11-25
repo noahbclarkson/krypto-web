@@ -8,6 +8,15 @@ pub struct MarketDataService {
     market: Market,
 }
 
+#[derive(Clone, Debug)]
+pub struct CandleBar {
+    pub time: i64,
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
+}
+
 impl MarketDataService {
     pub fn new(api_key: Option<String>, secret_key: Option<String>) -> Self {
         let market: Market = Binance::new(api_key, secret_key);
@@ -58,5 +67,33 @@ impl MarketDataService {
         .map_err(|e| AppError::Data(e.to_string()))?;
 
         Ok(df)
+    }
+
+    pub async fn fetch_candles_vec(
+        &self,
+        symbol: &str,
+        interval: &str,
+        limit: u16,
+    ) -> Result<Vec<CandleBar>, AppError> {
+        let klines = self
+            .market
+            .get_klines(symbol, interval, Some(limit), None, None)
+            .await
+            .map_err(|e| AppError::Binance(e.to_string()))?;
+
+        let KlineSummaries::AllKlineSummaries(data) = klines;
+        let mut out = Vec::with_capacity(data.len());
+
+        for k in data {
+            out.push(CandleBar {
+                time: k.open_time,
+                open: k.open,
+                high: k.high,
+                low: k.low,
+                close: k.close,
+            });
+        }
+
+        Ok(out)
     }
 }

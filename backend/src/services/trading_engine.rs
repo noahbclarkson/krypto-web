@@ -28,8 +28,9 @@ struct StrategyRow {
     parameters: Value,
 }
 
-// Limit snapshot inserts so we don't flood the DB when ticks are noisy.
 const SNAPSHOT_COOLDOWN_MS: i64 = 1_000;
+const FEE_RATE: f64 = 0.001;
+const SLIPPAGE_RATE: f64 = 0.001;
 
 pub async fn start_engine(pool: PgPool, market_service: Arc<MarketDataService>) {
     info!("Trading Engine Starting (WebSocket mode)...");
@@ -386,79 +387,103 @@ async fn execute_paper_trade(
     pool: &PgPool,
     session: &Session,
     signal: f64,
-    price: f64,
+    raw_price: f64,
     reason: String,
     snapshot_tracker: &mut HashMap<Uuid, DateTime<Utc>>,
 ) -> Result<(), AppError> {
     let now = Utc::now();
+
     if (signal - session.current_position).abs() < 0.1 {
-        update_equity_mtm(pool, session, price, snapshot_tracker, false).await?;
+        update_equity_mtm(pool, session, raw_price, snapshot_tracker, false).await?;
         return Ok(());
     }
 
+    let is_buying = signal > session.current_position;
+    let exec_price = if is_buying {
+        raw_price * (1.0 + SLIPPAGE_RATE)
+    } else {
+        raw_price * (1.0 - SLIPPAGE_RATE)
+    };
+
     info!(
-        "Signal change for session {}: {} -> {} @ ${}",
-        session.id, session.current_position, signal, price
+        "Trade {}: Pos {} -> {} @ ${:.2} (Slip: {:.2}%)",
+        session.symbol,
+        session.current_position,
+        signal,
+        exec_price,
+        SLIPPAGE_RATE * 100.0
     );
 
     let mut tx = pool.begin().await?;
-    let mut new_equity = session.current_equity;
+    let mut current_equity = session.current_equity;
 
     if session.current_position.abs() > 0.0 {
-        let entry_price = session.entry_price.unwrap_or(price);
+        let entry_price = session.entry_price.unwrap_or(exec_price);
         let basis_equity = session.entry_equity.unwrap_or(session.current_equity);
+
         let direction = if session.current_position > 0.0 {
             1.0
         } else {
             -1.0
         };
-        let raw_pnl_pct = direction * (price - entry_price) / entry_price;
-        let settled_equity = basis_equity * (1.0 + raw_pnl_pct);
+
+        let price_diff_pct = (exec_price - entry_price) / entry_price;
+        let raw_pnl_pct = direction * price_diff_pct;
+
+        let fee_deduction = basis_equity * FEE_RATE;
+
+        let settled_equity = (basis_equity * (1.0 + raw_pnl_pct)) - fee_deduction;
         let pnl_amount = settled_equity - basis_equity;
-        new_equity = settled_equity;
+
+        current_equity = settled_equity;
 
         let side = if session.current_position > 0.0 {
             "SELL"
         } else {
             "BUY"
         };
+
         sqlx::query(
             "INSERT INTO trades (session_id, symbol, side, price, quantity, pnl, reason) VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(session.id)
         .bind(&session.symbol)
         .bind(side)
-        .bind(price)
+        .bind(exec_price)
         .bind(0.0_f64)
         .bind(pnl_amount)
-        .bind(&reason)
+        .bind(format!("Close Position (Fee: ${:.2})", fee_deduction))
         .execute(&mut *tx)
         .await?;
     }
 
     if signal.abs() > 0.0 {
         let side = if signal > 0.0 { "BUY" } else { "SELL" };
+
+        let entry_fee = current_equity * FEE_RATE;
+        current_equity -= entry_fee;
+
         sqlx::query(
             "INSERT INTO trades (session_id, symbol, side, price, quantity, pnl, reason) VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(session.id)
         .bind(&session.symbol)
         .bind(side)
-        .bind(price)
+        .bind(exec_price)
         .bind(0.0_f64)
-        .bind(0.0_f64)
-        .bind(&reason)
+        .bind(-entry_fee)
+        .bind(format!("{} | Fee: ${:.2}", reason, entry_fee))
         .execute(&mut *tx)
         .await?;
     }
 
     let new_entry_price = if signal.abs() > 0.0 {
-        Some(price)
+        Some(exec_price)
     } else {
         None
     };
     let new_entry_equity = if signal.abs() > 0.0 {
-        Some(new_equity)
+        Some(current_equity)
     } else {
         None
     };
@@ -466,7 +491,7 @@ async fn execute_paper_trade(
     sqlx::query(
         "UPDATE sessions SET current_equity = $1, current_position = $2, entry_price = $3, entry_equity = $4, last_update = $5 WHERE id = $6",
     )
-    .bind(new_equity)
+    .bind(current_equity)
     .bind(signal)
     .bind(new_entry_price)
     .bind(new_entry_equity)
@@ -477,7 +502,7 @@ async fn execute_paper_trade(
 
     sqlx::query("INSERT INTO equity_snapshots (session_id, equity, timestamp) VALUES ($1, $2, $3)")
         .bind(session.id)
-        .bind(new_equity)
+        .bind(current_equity)
         .bind(now)
         .execute(&mut *tx)
         .await?;

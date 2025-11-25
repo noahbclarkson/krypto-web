@@ -58,3 +58,11 @@ export interface PortfolioPoint {
   timestamp: string;
   total_equity: number;
 }
+
+export interface Candle {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}

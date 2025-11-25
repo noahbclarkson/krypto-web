@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,11 +11,12 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Rocket, Trash2 } from "lucide-react";
+import { Rocket, Trash2, Eye } from "lucide-react";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 
 export function StrategyList() {
+  const router = useRouter();
   const { data: strategies } = useQuery({ queryKey: ["strategies"], queryFn: api.getStrategies });
   const { data: sessions } = useQuery({ queryKey: ["sessions"], queryFn: api.getSessions, refetchInterval: 5000 });
   const queryClient = useQueryClient();
@@ -242,6 +244,18 @@ export function StrategyList() {
                     </div>
                 </div>
                 </div>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full border-slate-700 text-slate-300 hover:text-white hover:border-indigo-500"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        router.push(`/strategies/${strat.id}`);
+                    }}
+                >
+                    <Eye className="w-4 h-4 mr-2" />
+                    View Details
+                </Button>
             </CardContent>
             </Card>
           );

@@ -5,10 +5,10 @@ import { Session } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
+import { CandleChart } from "./CandleChart";
 
 interface Props {
   session: Session | null;
@@ -24,11 +24,11 @@ export function SessionDetailsDialog({ session, isOpen, onClose }: Props) {
     refetchInterval: 1000
   });
 
-  const { data: equity } = useQuery({
-    queryKey: ["equity", session?.id],
-    queryFn: () => api.getEquityCurve(session!.id),
+  const { data: candles } = useQuery({
+    queryKey: ["candles", session?.id],
+    queryFn: () => api.getSessionCandles(session!.id),
     enabled: !!session,
-    refetchInterval: 1000
+    refetchInterval: 5000
   });
 
   if (!session) return null;
@@ -71,36 +71,22 @@ export function SessionDetailsDialog({ session, isOpen, onClose }: Props) {
           </div>
         </div>
 
-        <div className="h-48 w-full mt-4 bg-slate-900/50 rounded-lg border border-slate-800 p-2">
-          {equity && equity.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={equity}>
-                <XAxis
-                    dataKey="timestamp"
-                    hide
-                />
-                <YAxis
-                    domain={['auto', 'auto']}
-                    hide
-                />
-                <Tooltip
-                    contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }}
-                    labelFormatter={(v) => format(new Date(v), "HH:mm:ss")}
-                />
-                <Area
-                    type="monotone"
-                    dataKey="equity"
-                    stroke="#6366f1"
-                    fill="#6366f1"
-                    fillOpacity={0.1}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-full flex items-center justify-center text-slate-500 text-sm">
-              Not enough data for chart
-            </div>
-          )}
+        <div className="h-72 w-full mt-4 bg-slate-900/50 rounded-lg border border-slate-800 overflow-hidden">
+          <div className="h-full w-full p-3">
+            {candles && candles.length > 0 ? (
+              <CandleChart
+                data={candles}
+                colors={{
+                  backgroundColor: "#0f172a",
+                  textColor: "#94a3b8",
+                }}
+              />
+            ) : (
+              <div className="h-full flex items-center justify-center text-slate-500 text-sm">
+                Waiting for live market data...
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="mt-4 flex-1 overflow-hidden flex flex-col">

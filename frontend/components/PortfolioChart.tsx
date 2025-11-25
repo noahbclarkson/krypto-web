@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 export function PortfolioChart() {
   const [rangeDays, setRangeDays] = useState(7);
-  const [interval, setInterval] = useState("1h");
+  const [interval, setInterval] = useState("15m");
 
   const { data } = useQuery({
     queryKey: ["portfolio_history", rangeDays, interval],
@@ -18,42 +18,41 @@ export function PortfolioChart() {
     refetchInterval: 5000
   });
 
-  if (!data || data.length === 0) return null;
+  if (!data || data.length === 0) {
+    return (
+      <Card className="bg-slate-900 border-slate-800 mb-8 p-8 text-center text-slate-500">
+        Waiting for trading data...
+      </Card>
+    );
+  }
 
   const latest = data[data.length - 1].total_equity;
   const start = data[0].total_equity;
   const pnl = latest - start;
 
   return (
-    <Card className="bg-slate-900 border-slate-800 mb-8">
-      <CardHeader>
-        <CardTitle className="flex justify-between items-center">
-            <div className="flex items-center gap-2 text-slate-100">
-                <TrendingUp className="h-5 w-5 text-indigo-500" />
-                Total Portfolio Value
-            </div>
-            <div className={`font-mono ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                ${latest.toLocaleString()} ({pnl >= 0 ? '+' : ''}{((pnl/start)*100).toFixed(2)}%)
-            </div>
-        </CardTitle>
-        <div className="flex gap-2 mt-2">
-          <div className="w-32">
+    <Card className="bg-slate-900 border-slate-800 h-full">
+      <CardHeader className="pb-3">
+        <div className="flex justify-between items-center">
+          <CardTitle className="flex items-center gap-2 text-slate-100">
+            <TrendingUp className="h-5 w-5 text-indigo-500" />
+            Portfolio Equity Curve
+          </CardTitle>
+          <div className="flex gap-2">
             <Select value={String(rangeDays)} onValueChange={(v) => setRangeDays(Number(v))}>
-              <SelectTrigger className="h-9 bg-slate-950 border-slate-800 text-sm">
-                <SelectValue placeholder="Range" />
+              <SelectTrigger className="h-8 bg-slate-950 border-slate-800 text-xs w-24">
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="1">Last 24h</SelectItem>
-                <SelectItem value="7">Last 7d</SelectItem>
-                <SelectItem value="30">Last 30d</SelectItem>
-                <SelectItem value="90">Last 90d</SelectItem>
+                <SelectItem value="1">24h</SelectItem>
+                <SelectItem value="7">7d</SelectItem>
+                <SelectItem value="30">30d</SelectItem>
+                <SelectItem value="90">90d</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-          <div className="w-32">
             <Select value={interval} onValueChange={(v) => setInterval(v)}>
-              <SelectTrigger className="h-9 bg-slate-950 border-slate-800 text-sm">
-                <SelectValue placeholder="Interval" />
+              <SelectTrigger className="h-8 bg-slate-950 border-slate-800 text-xs w-20">
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="3m">3m</SelectItem>
@@ -65,7 +64,7 @@ export function PortfolioChart() {
           </div>
         </div>
       </CardHeader>
-      <CardContent className="h-[300px]">
+      <CardContent className="h-[340px]">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data}>
             <defs>
@@ -84,12 +83,12 @@ export function PortfolioChart() {
                 domain={['auto', 'auto']}
                 stroke="#475569"
                 fontSize={12}
-                tickFormatter={(val) => `${(val/1000).toFixed(1)}k`}
+                tickFormatter={(val) => `$${val.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
             />
             <Tooltip
                 contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }}
                 labelFormatter={(v) => format(new Date(v), "MMM dd HH:mm")}
-                formatter={(value: number) => [`${value.toFixed(2)}`, "Equity"]}
+                formatter={(value: number) => [`$${value.toFixed(2)}`, "Total Equity"]}
             />
             <Area
                 type="monotone"
