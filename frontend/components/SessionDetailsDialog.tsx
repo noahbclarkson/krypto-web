@@ -17,38 +17,55 @@ interface Props {
 }
 
 export function SessionDetailsDialog({ session, isOpen, onClose }: Props) {
-  const { data: trades } = useQuery({
-    queryKey: ["trades", session?.id],
-    queryFn: () => api.getSessionTrades(session!.id),
+  const { data: sessions } = useQuery({
+    queryKey: ["sessions"],
+    queryFn: api.getSessions,
     enabled: !!session,
+    refetchInterval: 1000,
+  });
+
+  const liveSession = sessions?.find((s) => s.id === session?.id) ?? session;
+
+  const { data: trades } = useQuery({
+    queryKey: ["trades", liveSession?.id],
+    queryFn: () => api.getSessionTrades(liveSession!.id),
+    enabled: !!liveSession,
     refetchInterval: 1000
   });
 
   const { data: candles } = useQuery({
-    queryKey: ["candles", session?.id],
-    queryFn: () => api.getSessionCandles(session!.id),
-    enabled: !!session,
+    queryKey: ["candles", liveSession?.id],
+    queryFn: () => api.getSessionCandles(liveSession!.id),
+    enabled: !!liveSession,
     refetchInterval: 5000
   });
 
-  if (!session) return null;
+  if (!liveSession) return null;
 
-  const pnl = session.current_equity - session.initial_capital;
-  const pnlPct = (pnl / session.initial_capital) * 100;
+  const pnl = liveSession.current_equity - liveSession.initial_capital;
+  const pnlPct = (pnl / liveSession.initial_capital) * 100;
+  const realizedPnl = (trades || []).reduce((acc, t) => acc + (t.pnl || 0), 0);
+  const unrealizedPnl = pnl - realizedPnl;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl bg-slate-950 border-slate-800 text-slate-50 max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="w-full max-w-[90vw] lg:max-w-[1400px] bg-slate-950 border-slate-800 text-slate-50 max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-4 text-xl">
-            <span>{session.symbol}</span>
-            <Badge variant="outline">{session.interval}</Badge>
+          <DialogTitle className="flex items-center gap-2 text-xl flex-wrap">
+            <span>{liveSession.symbol}</span>
+            <Badge variant="outline">{liveSession.interval}</Badge>
             <Badge variant={pnl >= 0 ? "default" : "destructive"}>
               {pnl >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%
             </Badge>
+            <Badge variant={realizedPnl >= 0 ? "default" : "destructive"}>
+              Realized {realizedPnl >= 0 ? "+" : ""}{realizedPnl.toFixed(2)}
+            </Badge>
+            <Badge variant={unrealizedPnl >= 0 ? "secondary" : "destructive"}>
+              Unrealized {unrealizedPnl >= 0 ? "+" : ""}{unrealizedPnl.toFixed(2)}
+            </Badge>
           </DialogTitle>
           <DialogDescription className="text-slate-400">
-            Paper Trading Session ID: <span className="font-mono text-xs">{session.id}</span>
+            Paper Trading Session ID: <span className="font-mono text-xs">{liveSession.id}</span>
           </DialogDescription>
         </DialogHeader>
 
@@ -56,13 +73,13 @@ export function SessionDetailsDialog({ session, isOpen, onClose }: Props) {
           <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
             <div className="text-slate-400 text-xs">Current Equity</div>
             <div className="text-2xl font-bold font-mono text-green-400">
-              ${session.current_equity.toFixed(4)}
+              ${liveSession.current_equity.toFixed(4)}
             </div>
           </div>
           <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
             <div className="text-slate-400 text-xs">Position</div>
             <div className="text-2xl font-bold font-mono">
-              {session.current_position > 0 ? "LONG" : session.current_position < 0 ? "SHORT" : "FLAT"}
+              {liveSession.current_position > 0 ? "LONG" : liveSession.current_position < 0 ? "SHORT" : "FLAT"}
             </div>
           </div>
           <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
@@ -92,15 +109,15 @@ export function SessionDetailsDialog({ session, isOpen, onClose }: Props) {
         <div className="mt-4 flex-1 overflow-hidden flex flex-col">
           <h3 className="text-sm font-medium mb-2 text-slate-300">Trade History</h3>
           <div className="bg-slate-900 border-slate-800 rounded-md flex-1 overflow-hidden">
-            <ScrollArea className="h-[200px]">
+            <ScrollArea className="h-[240px]">
               <Table>
                 <TableHeader className="bg-slate-900 sticky top-0">
                   <TableRow className="border-slate-800 hover:bg-slate-900">
                     <TableHead className="text-slate-400">Time</TableHead>
                     <TableHead className="text-slate-400">Side</TableHead>
                     <TableHead className="text-slate-400 text-right">Price</TableHead>
-                    <TableHead className="text-slate-400 text-right">PnL</TableHead>
-                    <TableHead className="text-slate-400">Reason</TableHead>
+                    <TableHead className="text-slate-400 text-right">Realized / Fees</TableHead>
+                    <TableHead className="text-slate-400 w-[60%]">Reason</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -120,7 +137,7 @@ export function SessionDetailsDialog({ session, isOpen, onClose }: Props) {
                       <TableCell className={`text-right font-mono ${(t.pnl || 0) > 0 ? "text-green-400" : (t.pnl || 0) < 0 ? "text-red-400" : "text-slate-500"}`}>
                         {t.pnl ? `${t.pnl.toFixed(4)}` : "-"}
                       </TableCell>
-                      <TableCell className="text-xs text-slate-500 max-w-[200px] truncate" title={t.reason || ""}>
+                      <TableCell className="text-xs text-slate-500 whitespace-normal break-words" title={t.reason || ""}>
                         {t.reason || "-"}
                       </TableCell>
                     </TableRow>
