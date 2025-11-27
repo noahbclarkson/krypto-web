@@ -296,107 +296,29 @@ async fn get_portfolio_history(
     query: web::Query<PortfolioQuery>,
 ) -> Result<impl Responder, AppError> {
     let range_days = query.range_days.unwrap_or(7).max(1);
-    let (bucket_expr, bucket_start_expr, bucket_end_expr, step_expr) = match query
-        .interval
-        .as_deref()
-        .unwrap_or("15m")
-    {
-        "3m" => (
-            "date_trunc('minute', es.timestamp) - ((extract(minute from es.timestamp)::int % 3) * interval '1 minute')",
-            "date_trunc('minute', start_ts) - ((extract(minute from start_ts)::int % 3) * interval '1 minute')",
-            "date_trunc('minute', end_ts) - ((extract(minute from end_ts)::int % 3) * interval '1 minute')",
-            "3 minutes",
-        ),
-        "15m" => (
-            "date_trunc('minute', es.timestamp) - ((extract(minute from es.timestamp)::int % 15) * interval '1 minute')",
-            "date_trunc('minute', start_ts) - ((extract(minute from start_ts)::int % 15) * interval '1 minute')",
-            "date_trunc('minute', end_ts) - ((extract(minute from end_ts)::int % 15) * interval '1 minute')",
-            "15 minutes",
-        ),
-        "1h" => (
-            "date_trunc('hour', es.timestamp)",
-            "date_trunc('hour', start_ts)",
-            "date_trunc('hour', end_ts)",
-            "1 hour",
-        ),
-        "1d" => (
-            "date_trunc('day', es.timestamp)",
-            "date_trunc('day', start_ts)",
-            "date_trunc('day', end_ts)",
-            "1 day",
-        ),
-        _ => (
-            "date_trunc('minute', es.timestamp) - ((extract(minute from es.timestamp)::int % 15) * interval '1 minute')",
-            "date_trunc('minute', start_ts) - ((extract(minute from start_ts)::int % 15) * interval '1 minute')",
-            "date_trunc('minute', end_ts) - ((extract(minute from end_ts)::int % 15) * interval '1 minute')",
-            "15 minutes",
-        ),
+
+    let step_seconds = match query.interval.as_deref().unwrap_or("15m") {
+        "3m" => 180,
+        "15m" => 900,
+        "1h" => 3600,
+        "4h" => 14400,
+        "1d" => 86400,
+        _ => 900,
     };
 
-    let sql = format!(
-        r#"
-        WITH params AS (
-            SELECT
-                NOW() - ($1 * interval '1 day') AS start_ts,
-                NOW() AS end_ts
-        ),
-        bounds AS (
-            SELECT
-                {start_bucket} AS start_bucket,
-                {end_bucket} AS end_bucket
-            FROM params
-        ),
-        buckets AS (
-            SELECT generate_series(start_bucket, end_bucket, interval '{step}') AS bucket
-            FROM bounds
-        ),
-        bucketed AS (
-            SELECT
-                es.session_id,
-                {bucket} AS bucket,
-                es.equity,
-                row_number() OVER (
-                    PARTITION BY es.session_id, {bucket}
-                    ORDER BY es.timestamp DESC
-                ) AS rn
-            FROM equity_snapshots es
-            WHERE es.timestamp >= (SELECT start_ts FROM params)
-        )
-        SELECT
-            bucket AS timestamp,
-            ROUND(SUM(equity)::numeric, 2)::float8 AS total_equity
-        FROM (
-            SELECT
-                sb.session_id,
-                sb.bucket,
-                (
-                    SELECT d.equity
-                    FROM bucketed d
-                    WHERE d.session_id = sb.session_id
-                      AND d.rn = 1
-                      AND d.bucket <= sb.bucket
-                    ORDER BY d.bucket DESC
-                    LIMIT 1
-                ) AS equity
-            FROM (
-                SELECT DISTINCT es.session_id, b.bucket
-                FROM equity_snapshots es
-                CROSS JOIN buckets b
-                WHERE es.timestamp >= (SELECT start_ts FROM params)
-            ) sb
-        ) filled
-        WHERE equity IS NOT NULL
-        GROUP BY bucket
-        ORDER BY bucket ASC
-        "#,
-        bucket = bucket_expr,
-        start_bucket = bucket_start_expr,
-        end_bucket = bucket_end_expr,
-        step = step_expr
-    );
+    let start_ts = Utc::now() - chrono::Duration::days(range_days);
 
-    let recs = sqlx::query_as::<_, PortfolioPoint>(&sql)
-        .bind(range_days)
+    let sql = r#"
+        SELECT timestamp, total_equity
+        FROM portfolio_cache
+        WHERE timestamp >= $1
+        AND CAST(EXTRACT(EPOCH FROM timestamp) AS INTEGER) % $2 = 0
+        ORDER BY timestamp ASC
+    "#;
+
+    let recs = sqlx::query_as::<_, PortfolioPoint>(sql)
+        .bind(start_ts)
+        .bind(step_seconds)
         .fetch_all(pool.get_ref())
         .await?;
 
@@ -423,7 +345,7 @@ async fn get_session_candles(
         .into_iter()
         .map(|c| CandleBar {
             time: DateTime::<Utc>::from_timestamp_millis(c.time)
-                .unwrap_or_else(|| Utc::now())
+                .unwrap_or_else(Utc::now)
                 .to_rfc3339(),
             open: c.open,
             high: c.high,

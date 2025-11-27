@@ -48,6 +48,8 @@ pub struct Session {
     pub entry_equity: Option<f64>,
     pub current_position: f64,
     pub entry_price: Option<f64>,
+    pub highest_high: Option<f64>,
+    pub lowest_low: Option<f64>,
     pub status: String,
     pub execution_mode: String,
     pub allocated_weight: f64,

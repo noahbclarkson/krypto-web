@@ -10,7 +10,6 @@ use krypto::algo::strategies::{
 };
 use krypto::algo::SignalGenerator;
 use krypto::features::indicators::FeatureEngine;
-use polars::prelude::*;
 use serde_json::Value;
 use sqlx::{FromRow, PgPool};
 use tokio::sync::mpsc;
@@ -28,12 +27,13 @@ struct StrategyRow {
     parameters: Value,
 }
 
-const SNAPSHOT_COOLDOWN_MS: i64 = 1_000;
+const SNAPSHOT_COOLDOWN_MS: i64 = 15_000;
 const FEE_RATE: f64 = 0.001;
 const SLIPPAGE_RATE: f64 = 0.001;
+const TRAILING_SL_PCT: f64 = 0.05;
 
 pub async fn start_engine(pool: PgPool, market_service: Arc<MarketDataService>) {
-    info!("Trading Engine Starting (WebSocket mode)...");
+    info!("Trading Engine Starting (Bar Close Execution Mode)...");
 
     loop {
         if let Err(e) = run_engine_cycle(&pool, &market_service).await {
@@ -47,17 +47,18 @@ async fn run_engine_cycle(
     pool: &PgPool,
     market_service: &Arc<MarketDataService>,
 ) -> Result<(), AppError> {
-    let mut symbols = fetch_active_symbols(pool).await?;
+    let subscriptions = fetch_active_subscriptions(pool).await?;
 
-    if symbols.is_empty() {
-        info!("No active sessions detected. Waiting for new sessions...");
+    if subscriptions.is_empty() {
+        info!("No active sessions. Waiting...");
         tokio::time::sleep(Duration::from_secs(5)).await;
         return Ok(());
     }
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let stream = MarketStream::new();
-    stream.start_stream(symbols.clone(), tx).await;
+    stream.start_stream(subscriptions.clone(), tx).await;
+
     let mut snapshot_tracker: HashMap<Uuid, DateTime<Utc>> = HashMap::new();
     let mut refresh = tokio::time::interval(Duration::from_secs(30));
 
@@ -65,27 +66,29 @@ async fn run_engine_cycle(
         tokio::select! {
             maybe_event = rx.recv() => {
                 let Some(event) = maybe_event else {
-                    warn!("Websocket channel closed, restarting stream after short backoff...");
+                    warn!("Websocket channel closed, restarting...");
                     break;
                 };
-                if let Some((symbol, kline)) = extract_kline(event) {
-                    if let Err(e) = process_symbol_update(
+
+                if let Some((symbol, interval, kline)) = extract_kline_info(event) {
+                    if let Err(e) = process_candle_event(
                         pool,
                         market_service,
                         &symbol,
+                        &interval,
                         &kline,
                         &mut snapshot_tracker,
                     )
                     .await
                     {
-                        error!("Error processing update for {}: {:?}", symbol, e);
+                        error!("Error processing {} {}: {:?}", symbol, interval, e);
                     }
                 }
             }
             _ = refresh.tick() => {
-                let current_symbols = fetch_active_symbols(pool).await?;
-                if current_symbols != symbols {
-                    info!("Active session set changed, refreshing websocket subscriptions...");
+                let current_subs = fetch_active_subscriptions(pool).await?;
+                if current_subs != subscriptions {
+                    info!("Subscription list changed, restarting stream...");
                     break;
                 }
             }
@@ -97,51 +100,132 @@ async fn run_engine_cycle(
     Ok(())
 }
 
-async fn fetch_active_symbols(pool: &PgPool) -> Result<Vec<String>, AppError> {
+async fn fetch_active_subscriptions(pool: &PgPool) -> Result<Vec<(String, String)>, AppError> {
     let sessions = sqlx::query_as::<_, Session>("SELECT * FROM sessions WHERE status = 'active'")
         .fetch_all(pool)
         .await?;
 
-    let mut symbols: Vec<String> = sessions.into_iter().map(|s| s.symbol).collect();
-    symbols.sort();
-    symbols.dedup();
-    Ok(symbols)
+    let mut subs: Vec<(String, String)> = sessions
+        .into_iter()
+        .map(|s| (s.symbol, s.interval))
+        .collect();
+
+    subs.sort();
+    subs.dedup();
+    Ok(subs)
 }
 
-fn extract_kline(event: CombinedStreamEvent<WebsocketEventUntag>) -> Option<(String, Kline)> {
+fn extract_kline_info(
+    event: CombinedStreamEvent<WebsocketEventUntag>,
+) -> Option<(String, String, Kline)> {
+    let (stream_name, _) = event.parse_stream();
+
     if let WebsocketEventUntag::WebsocketEvent(WebsocketEvent::Kline(kline_event)) = event.data {
+        let parts: Vec<&str> = stream_name.split('@').collect();
+        if parts.len() < 2 {
+            return None;
+        }
+        let interval = parts[1].replace("kline_", "");
         let symbol = kline_event.kline.symbol.to_uppercase();
-        return Some((symbol, kline_event.kline));
+        return Some((symbol, interval, kline_event.kline));
     }
     None
 }
 
-async fn process_symbol_update(
+async fn process_candle_event(
     pool: &PgPool,
     market: &MarketDataService,
     symbol: &str,
+    interval: &str,
     kline: &Kline,
     snapshot_tracker: &mut HashMap<Uuid, DateTime<Utc>>,
 ) -> Result<(), AppError> {
-    let price = kline.close;
-    let is_final_bar = kline.is_final_bar;
+    let current_price = kline.close;
+    let is_closed = kline.is_final_bar;
 
     let sessions = sqlx::query_as::<_, Session>(
-        "SELECT * FROM sessions WHERE status = 'active' AND symbol = $1",
+        "SELECT * FROM sessions WHERE status = 'active' AND symbol = $1 AND interval = $2",
     )
     .bind(symbol)
+    .bind(interval)
     .fetch_all(pool)
     .await?;
 
     for session in sessions {
-        update_equity_mtm(pool, &session, price, snapshot_tracker, is_final_bar).await?;
+        update_equity_mtm(pool, &session, current_price, snapshot_tracker, false).await?;
 
-        if is_final_bar {
-            run_strategy_logic(pool, market, &session, price, snapshot_tracker).await?;
+        if is_closed {
+            info!("Candle Closed: {} {} @ ${}", symbol, interval, current_price);
+
+            let position_closed = check_exit_conditions(
+                pool,
+                &session,
+                kline,
+                snapshot_tracker
+            ).await?;
+
+            if !position_closed {
+                run_strategy_logic(pool, market, &session, current_price, snapshot_tracker).await?;
+            }
         }
     }
 
     Ok(())
+}
+
+async fn check_exit_conditions(
+    pool: &PgPool,
+    session: &Session,
+    kline: &Kline,
+    snapshot_tracker: &mut HashMap<Uuid, DateTime<Utc>>,
+) -> Result<bool, AppError> {
+    if session.current_position == 0.0 {
+        return Ok(false);
+    }
+
+    let mut highest = session.highest_high.unwrap_or(session.entry_price.unwrap_or(kline.close));
+    let mut lowest = session.lowest_low.unwrap_or(session.entry_price.unwrap_or(kline.close));
+    let mut db_update_needed = false;
+
+    if session.current_position > 0.0 {
+        if kline.high > highest {
+            highest = kline.high;
+            db_update_needed = true;
+        }
+
+        let stop_price = highest * (1.0 - TRAILING_SL_PCT);
+
+        if kline.low <= stop_price {
+            info!("LONG Trailing Stop Triggered (Bar Close): {} Low ${} <= Stop ${}", session.symbol, kline.low, stop_price);
+            close_position(pool, session, kline.close, "Trailing Stop (Bar Close)".to_string(), snapshot_tracker).await?;
+            return Ok(true);
+        }
+
+    } else {
+        if kline.low < lowest {
+            lowest = kline.low;
+            db_update_needed = true;
+        }
+
+        let stop_price = lowest * (1.0 + TRAILING_SL_PCT);
+
+        if kline.high >= stop_price {
+            info!("SHORT Trailing Stop Triggered (Bar Close): {} High ${} >= Stop ${}", session.symbol, kline.high, stop_price);
+            close_position(pool, session, kline.close, "Trailing Stop (Bar Close)".to_string(), snapshot_tracker).await?;
+            return Ok(true);
+        }
+    }
+
+    if db_update_needed {
+        sqlx::query("UPDATE sessions SET highest_high = $1, lowest_low = $2 WHERE id = $3")
+            .bind(highest)
+            .bind(lowest)
+            .bind(session.id)
+            .execute(pool)
+            .await?;
+    }
+
+    Ok(false)
 }
 
 async fn update_equity_mtm(
@@ -157,11 +241,8 @@ async fn update_equity_mtm(
 
     let entry_price = session.entry_price.unwrap_or(current_price);
     let basis_equity = session.entry_equity.unwrap_or(session.current_equity);
-    let direction = if session.current_position > 0.0 {
-        1.0
-    } else {
-        -1.0
-    };
+
+    let direction = if session.current_position > 0.0 { 1.0 } else { -1.0 };
     let raw_pnl_pct = direction * (current_price - entry_price) / entry_price;
     let mtm_equity = basis_equity * (1.0 + raw_pnl_pct);
 
@@ -171,7 +252,8 @@ async fn update_equity_mtm(
         .num_milliseconds();
 
     let equity_move = (mtm_equity - session.current_equity).abs();
-    let should_update = force_snapshot || equity_move > 1e-6 && time_since_update >= 500;
+
+    let should_update = force_snapshot || (equity_move > 0.01 && time_since_update >= 1000);
     if !should_update {
         return Ok(());
     }
@@ -222,116 +304,80 @@ async fn run_strategy_logic(
     let strategy_type = strategy_record.strategy_type;
 
     let raw_df = market
-        .fetch_candles(&session.symbol, &session.interval, 500)
+        .fetch_candles(&session.symbol, &session.interval, 1000)
         .await?;
 
     let df =
         FeatureEngine::add_technicals(&raw_df, None).map_err(|e| AppError::Data(e.to_string()))?;
 
-    let (signal_series, explanation_series) = match strategy_type.as_str() {
+    let signal_series = match strategy_type.as_str() {
         "DynamicTrend" => {
             let strat: DynamicTrend = serde_json::from_value(strategy_record.parameters.clone())
                 .map_err(|e| AppError::Strategy(format!("Config error: {e}")))?;
-            let signals = strat
+            strat
                 .predict(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            let explanations = strat
-                .explain(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            (signals, explanations)
+                .map_err(|e| AppError::Strategy(e.to_string()))?
         }
         "RsiMeanReversion" => {
             let strat: RsiMeanReversion =
                 serde_json::from_value(strategy_record.parameters.clone())
                     .map_err(|e| AppError::Strategy(format!("Config error: {e}")))?;
-            let signals = strat
+            strat
                 .predict(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            let explanations = strat
-                .explain(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            (signals, explanations)
+                .map_err(|e| AppError::Strategy(e.to_string()))?
         }
         "BollingerReversion" => {
             let strat: BollingerReversion =
                 serde_json::from_value(strategy_record.parameters.clone())
                     .map_err(|e| AppError::Strategy(format!("Config error: {e}")))?;
-            let signals = strat
+            strat
                 .predict(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            let explanations = strat
-                .explain(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            (signals, explanations)
+                .map_err(|e| AppError::Strategy(e.to_string()))?
         }
         "AtrBreakout" => {
             let strat: AtrBreakout = serde_json::from_value(strategy_record.parameters.clone())
                 .map_err(|e| AppError::Strategy(format!("Config error: {e}")))?;
-            let signals = strat
+            strat
                 .predict(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            let explanations = strat
-                .explain(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            (signals, explanations)
+                .map_err(|e| AppError::Strategy(e.to_string()))?
         }
         "VolatilitySqueeze" => {
             let strat: VolatilitySqueeze =
                 serde_json::from_value(strategy_record.parameters.clone())
                     .map_err(|e| AppError::Strategy(format!("Config error: {e}")))?;
-            let signals = strat
+            strat
                 .predict(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            let explanations = strat
-                .explain(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            (signals, explanations)
+                .map_err(|e| AppError::Strategy(e.to_string()))?
         }
         "MacdTrend" => {
             let strat: MacdTrend = serde_json::from_value(strategy_record.parameters.clone())
                 .map_err(|e| AppError::Strategy(format!("Config error: {e}")))?;
-            let signals = strat
+            strat
                 .predict(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            let explanations = strat
-                .explain(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            (signals, explanations)
+                .map_err(|e| AppError::Strategy(e.to_string()))?
         }
         "ObvTrend" => {
             let strat: ObvTrend = serde_json::from_value(strategy_record.parameters.clone())
                 .map_err(|e| AppError::Strategy(format!("Config error: {e}")))?;
-            let signals = strat
+            strat
                 .predict(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            let explanations = strat
-                .explain(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            (signals, explanations)
+                .map_err(|e| AppError::Strategy(e.to_string()))?
         }
         "PriceMomentum" => {
             let strat: PriceMomentum =
                 serde_json::from_value(strategy_record.parameters.clone())
                     .map_err(|e| AppError::Strategy(format!("Config error: {e}")))?;
-            let signals = strat
+            strat
                 .predict(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            let explanations = strat
-                .explain(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            (signals, explanations)
+                .map_err(|e| AppError::Strategy(e.to_string()))?
         }
         "AdaptiveMaCrossover" => {
             let strat: AdaptiveMaCrossover =
                 serde_json::from_value(strategy_record.parameters.clone())
                     .map_err(|e| AppError::Strategy(format!("Config error: {e}")))?;
-            let signals = strat
+            strat
                 .predict(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            let explanations = strat
-                .explain(&df)
-                .map_err(|e| AppError::Strategy(e.to_string()))?;
-            (signals, explanations)
+                .map_err(|e| AppError::Strategy(e.to_string()))?
         }
         _ => {
             warn!("Unknown strategy type: {}", strategy_type);
@@ -345,37 +391,17 @@ async fn run_strategy_logic(
     if signals.is_empty() {
         return Ok(());
     }
-    let latest_idx = signals.len() - 1;
-    let latest_signal = signals.get(latest_idx).unwrap_or(0.0);
-    let latest_reason = explanation_series
-        .str()
-        .map_err(|e| AppError::Data(e.to_string()))?
-        .get(latest_idx)
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "No explanation".to_string());
 
-    let target_signal = if session.execution_mode == "edge" {
-        let prev_signal = if latest_idx > 0 {
-            signals.get(latest_idx - 1).unwrap_or(0.0)
-        } else {
-            0.0
-        };
+    let idx = signals.len() - 1;
+    let signal = signals.get(idx).unwrap_or(0.0);
+    let reason = format!("{strategy_type} Signal");
 
-        if session.current_position == 0.0 && (latest_signal - prev_signal).abs() < 0.01 {
-            0.0
-        } else {
-            latest_signal
-        }
-    } else {
-        latest_signal
-    };
-
-    execute_paper_trade(
+    execute_strategy_signal(
         pool,
         session,
-        target_signal,
+        signal,
         current_price,
-        latest_reason,
+        reason,
         snapshot_tracker,
     )
     .await?;
@@ -383,7 +409,63 @@ async fn run_strategy_logic(
     Ok(())
 }
 
-async fn execute_paper_trade(
+async fn close_position(
+    pool: &PgPool,
+    session: &Session,
+    exec_price: f64,
+    reason: String,
+    snapshot_tracker: &mut HashMap<Uuid, DateTime<Utc>>,
+) -> Result<(), AppError> {
+    let mut tx = pool.begin().await?;
+    let now = Utc::now();
+
+    let entry_price = session.entry_price.unwrap_or(exec_price);
+    let basis_equity = session.entry_equity.unwrap_or(session.current_equity);
+
+    let direction = if session.current_position > 0.0 { 1.0 } else { -1.0 };
+    let pnl_pct = direction * (exec_price - entry_price) / entry_price;
+
+    let fee = basis_equity * FEE_RATE;
+    let settled_equity = (basis_equity * (1.0 + pnl_pct)) - fee;
+    let pnl_amt = settled_equity - basis_equity;
+
+    let side = if session.current_position > 0.0 { "SELL" } else { "BUY" };
+
+    sqlx::query(
+        "INSERT INTO trades (session_id, symbol, side, price, quantity, pnl, reason) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(session.id)
+    .bind(&session.symbol)
+    .bind(side)
+    .bind(exec_price)
+    .bind(0.0_f64)
+    .bind(pnl_amt)
+    .bind(&reason)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "UPDATE sessions SET current_equity = $1, current_position = 0, entry_price = NULL, entry_equity = NULL, highest_high = NULL, lowest_low = NULL, last_update = $2 WHERE id = $3",
+    )
+    .bind(settled_equity)
+    .bind(now)
+    .bind(session.id)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query("INSERT INTO equity_snapshots (session_id, equity, timestamp) VALUES ($1, $2, $3)")
+        .bind(session.id)
+        .bind(settled_equity)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
+    snapshot_tracker.insert(session.id, now);
+    Ok(())
+}
+
+async fn execute_strategy_signal(
     pool: &PgPool,
     session: &Session,
     signal: f64,
@@ -391,10 +473,7 @@ async fn execute_paper_trade(
     reason: String,
     snapshot_tracker: &mut HashMap<Uuid, DateTime<Utc>>,
 ) -> Result<(), AppError> {
-    let now = Utc::now();
-
     if (signal - session.current_position).abs() < 0.1 {
-        update_equity_mtm(pool, session, raw_price, snapshot_tracker, false).await?;
         return Ok(());
     }
 
@@ -405,63 +484,22 @@ async fn execute_paper_trade(
         raw_price * (1.0 - SLIPPAGE_RATE)
     };
 
-    info!(
-        "Trade {}: Pos {} -> {} @ ${:.2} (Slip: {:.2}%)",
-        session.symbol,
-        session.current_position,
-        signal,
-        exec_price,
-        SLIPPAGE_RATE * 100.0
-    );
-
-    let mut tx = pool.begin().await?;
-    let mut current_equity = session.current_equity;
-
-    if session.current_position.abs() > 0.0 {
-        let entry_price = session.entry_price.unwrap_or(exec_price);
-        let basis_equity = session.entry_equity.unwrap_or(session.current_equity);
-
-        let direction = if session.current_position > 0.0 {
-            1.0
-        } else {
-            -1.0
-        };
-
-        let price_diff_pct = (exec_price - entry_price) / entry_price;
-        let raw_pnl_pct = direction * price_diff_pct;
-
-        let fee_deduction = basis_equity * FEE_RATE;
-
-        let settled_equity = (basis_equity * (1.0 + raw_pnl_pct)) - fee_deduction;
-        let pnl_amount = settled_equity - basis_equity;
-
-        current_equity = settled_equity;
-
-        let side = if session.current_position > 0.0 {
-            "SELL"
-        } else {
-            "BUY"
-        };
-
-        sqlx::query(
-            "INSERT INTO trades (session_id, symbol, side, price, quantity, pnl, reason) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-        )
-        .bind(session.id)
-        .bind(&session.symbol)
-        .bind(side)
-        .bind(exec_price)
-        .bind(0.0_f64)
-        .bind(pnl_amount)
-        .bind(format!("Close Position (Fee: ${:.2})", fee_deduction))
-        .execute(&mut *tx)
-        .await?;
+    if session.current_position != 0.0 {
+        close_position(pool, session, exec_price, format!("Signal Flip: {reason}"), snapshot_tracker).await?;
     }
 
     if signal.abs() > 0.0 {
-        let side = if signal > 0.0 { "BUY" } else { "SELL" };
+        let mut tx = pool.begin().await?;
+        let now = Utc::now();
 
-        let entry_fee = current_equity * FEE_RATE;
-        current_equity -= entry_fee;
+        let fresh_session = sqlx::query_as::<_, Session>("SELECT * FROM sessions WHERE id = $1")
+            .bind(session.id)
+            .fetch_one(&mut *tx)
+            .await?;
+
+        let entry_fee = fresh_session.current_equity * FEE_RATE;
+        let start_equity = fresh_session.current_equity - entry_fee;
+        let side = if signal > 0.0 { "BUY" } else { "SELL" };
 
         sqlx::query(
             "INSERT INTO trades (session_id, symbol, side, price, quantity, pnl, reason) VALUES ($1, $2, $3, $4, $5, $6, $7)",
@@ -472,43 +510,26 @@ async fn execute_paper_trade(
         .bind(exec_price)
         .bind(0.0_f64)
         .bind(-entry_fee)
-        .bind(format!("{} | Fee: ${:.2}", reason, entry_fee))
+        .bind(format!("Open: {reason}"))
         .execute(&mut *tx)
         .await?;
-    }
 
-    let new_entry_price = if signal.abs() > 0.0 {
-        Some(exec_price)
-    } else {
-        None
-    };
-    let new_entry_equity = if signal.abs() > 0.0 {
-        Some(current_equity)
-    } else {
-        None
-    };
-
-    sqlx::query(
-        "UPDATE sessions SET current_equity = $1, current_position = $2, entry_price = $3, entry_equity = $4, last_update = $5 WHERE id = $6",
-    )
-    .bind(current_equity)
-    .bind(signal)
-    .bind(new_entry_price)
-    .bind(new_entry_equity)
-    .bind(now)
-    .bind(session.id)
-    .execute(&mut *tx)
-    .await?;
-
-    sqlx::query("INSERT INTO equity_snapshots (session_id, equity, timestamp) VALUES ($1, $2, $3)")
-        .bind(session.id)
-        .bind(current_equity)
+        sqlx::query(
+            "UPDATE sessions SET current_equity = $1, current_position = $2, entry_price = $3, entry_equity = $4, highest_high = $5, lowest_low = $6, last_update = $7 WHERE id = $8",
+        )
+        .bind(start_equity)
+        .bind(signal)
+        .bind(exec_price)
+        .bind(start_equity)
+        .bind(exec_price)
+        .bind(exec_price)
         .bind(now)
+        .bind(session.id)
         .execute(&mut *tx)
         .await?;
 
-    tx.commit().await?;
-    snapshot_tracker.insert(session.id, now);
+        tx.commit().await?;
+    }
 
     Ok(())
 }

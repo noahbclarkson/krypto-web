@@ -9,6 +9,7 @@ use actix_cors::Cors;
 use actix_web::{middleware::Logger, web, App, HttpServer};
 use config::Config;
 use services::market_data::MarketDataService;
+use services::portfolio_manager::PortfolioManager;
 use services::strategy_generator::StrategyGenerator;
 use std::sync::Arc;
 use tracing::info;
@@ -39,11 +40,17 @@ async fn main() -> std::io::Result<()> {
         config.binance_secret_key.clone(),
     ));
     let generator_service = Arc::new(StrategyGenerator::new(pool.clone(), market_service.clone()));
+    let portfolio_manager = Arc::new(PortfolioManager::new(pool.clone()));
 
     let engine_pool = pool.clone();
     let engine_market = market_service.clone();
     tokio::spawn(async move {
         services::trading_engine::start_engine(engine_pool, engine_market).await;
+    });
+
+    let pm_clone = portfolio_manager.clone();
+    tokio::spawn(async move {
+        pm_clone.start_background_task().await;
     });
 
     info!("Server starting at {}", config.server_addr);

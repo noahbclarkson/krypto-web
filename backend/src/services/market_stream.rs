@@ -23,19 +23,19 @@ impl MarketStream {
         self.keep_running.store(false, Ordering::Relaxed);
     }
 
-    /// Start a combined websocket stream for the provided symbols (1m klines).
+    /// Start a combined websocket stream for the provided symbol-interval pairs.
     pub async fn start_stream(
         &self,
-        symbols: Vec<String>,
+        subscriptions: Vec<(String, String)>,
         tx: UnboundedSender<CombinedStreamEvent<WebsocketEventUntag>>,
     ) {
         self.keep_running.store(true, Ordering::Relaxed);
         let keep_running = self.keep_running.clone();
         let conf = websocket_config_from_env();
         let ws_base = conf.ws_endpoint.clone();
-        let streams: Vec<String> = symbols
+        let streams: Vec<String> = subscriptions
             .into_iter()
-            .map(|s| format!("{}@kline_1m", s.to_lowercase()))
+            .map(|(symbol, interval)| format!("{}@kline_{}", symbol.to_lowercase(), interval))
             .collect();
 
         tokio::spawn(async move {
