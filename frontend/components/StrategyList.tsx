@@ -25,7 +25,6 @@ export function StrategyList() {
   const isTrading = activeSessions.length > 0;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [totalCapital, setTotalCapital] = useState(10000);
-  const [executionMode, setExecutionMode] = useState<"sync" | "edge">("sync");
   const [resetOpen, setResetOpen] = useState(false);
 
   useEffect(() => {
@@ -52,8 +51,7 @@ export function StrategyList() {
         const allocation = totalCapital * (s.kelly_fraction || 0.1) * leverageRatio;
         return api.startSession({
           strategy_id: s.id,
-          initial_capital: allocation,
-          execution_mode: executionMode
+          initial_capital: allocation
         });
       });
 
@@ -275,18 +273,6 @@ export function StrategyList() {
                         <div className={`text-2xl font-bold ${totalKelly > 1.0 ? 'text-orange-400' : 'text-blue-400'}`}>
                             {totalKelly.toFixed(2)}x
                         </div>
-                    </div>
-                    <div className="w-40">
-                        <div className="text-xs text-slate-400 uppercase font-bold mb-1">Entry Mode</div>
-                        <Select value={executionMode} onValueChange={(v) => setExecutionMode(v as "sync" | "edge")}>
-                            <SelectTrigger className="bg-slate-950 border-slate-700 h-10">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="sync">Immediate (Sync)</SelectItem>
-                                <SelectItem value="edge">Wait for Signal</SelectItem>
-                            </SelectContent>
-                        </Select>
                     </div>
                     <div className="w-48">
                         <div className="text-xs text-slate-400 uppercase font-bold mb-1">Total Capital ($)</div>

@@ -31,7 +31,6 @@ export interface Session {
   current_position: number;
   entry_price: number | null;
   status: "active" | "stopped";
-  execution_mode?: string;
   allocated_weight?: number;
   created_at: string;
   last_update: string;

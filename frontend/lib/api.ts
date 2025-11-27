@@ -33,7 +33,7 @@ export const api = {
   },
 
   // Sessions
-  startSession: async (params: { strategy_id: string; initial_capital: number; execution_mode?: string }) => {
+  startSession: async (params: { strategy_id: string; initial_capital: number }) => {
     const res = await axios.post(`${API_URL}/sessions`, params);
     return res.data;
   },
