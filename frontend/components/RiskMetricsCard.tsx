@@ -55,8 +55,8 @@ function calculateVaR(equityCurve: { total_equity: number }[], confidence: numbe
 
 export function RiskMetricsCard() {
   const { data: portfolioHistory } = useQuery({
-    queryKey: ["portfolio_history", 7, "15m"],
-    queryFn: () => api.getPortfolioHistory({ rangeDays: 7, interval: "15m" }),
+    queryKey: ["portfolio_history", 7, "15m", "line"],
+    queryFn: () => api.getPortfolioHistory({ rangeDays: 7, interval: "15m", style: "line" }),
     refetchInterval: 5000
   });
 
@@ -66,7 +66,11 @@ export function RiskMetricsCard() {
     refetchInterval: 5000
   });
 
-  if (!portfolioHistory || portfolioHistory.length === 0) {
+  const isLineData = (data: any): data is { total_equity: number }[] => {
+    return data && data.length > 0 && 'total_equity' in data[0];
+  };
+
+  if (!portfolioHistory || portfolioHistory.length === 0 || !isLineData(portfolioHistory)) {
     return (
       <Card className="bg-slate-900 border-slate-800 h-full">
         <CardHeader>

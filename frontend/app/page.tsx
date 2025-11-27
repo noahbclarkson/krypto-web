@@ -18,17 +18,21 @@ export default function Home() {
   });
 
   const { data: portfolioHistory } = useQuery({
-    queryKey: ["portfolio_history", 7, "15m"],
-    queryFn: () => api.getPortfolioHistory({ rangeDays: 7, interval: "15m" }),
+    queryKey: ["portfolio_history", 7, "15m", "line"],
+    queryFn: () => api.getPortfolioHistory({ rangeDays: 7, interval: "15m", style: "line" }),
     refetchInterval: 5000
   });
 
   const isTrading = sessions && sessions.length > 0;
 
-  const latestEquity = portfolioHistory && portfolioHistory.length > 0
+  const isLineData = (data: any): data is Array<{ timestamp: string; total_equity: number }> => {
+    return data && data.length > 0 && 'total_equity' in data[0];
+  };
+
+  const latestEquity = portfolioHistory && isLineData(portfolioHistory)
     ? portfolioHistory[portfolioHistory.length - 1].total_equity
     : 0;
-  const startEquity = portfolioHistory && portfolioHistory.length > 0
+  const startEquity = portfolioHistory && isLineData(portfolioHistory)
     ? portfolioHistory[0].total_equity
     : 0;
   const pnl24h = latestEquity - startEquity;

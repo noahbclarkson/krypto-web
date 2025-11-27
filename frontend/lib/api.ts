@@ -69,11 +69,16 @@ export const api = {
   },
 
   // Portfolio
-  getPortfolioHistory: async (params?: { rangeDays?: number; interval?: string }): Promise<PortfolioPoint[]> => {
+  getPortfolioHistory: async (params?: {
+    rangeDays?: number;
+    interval?: string;
+    style?: "line" | "candle"
+  }): Promise<PortfolioPoint[] | Candle[]> => {
     const res = await axios.get(`${API_URL}/portfolio/history`, {
       params: {
         range_days: params?.rangeDays,
-        interval: params?.interval
+        interval: params?.interval,
+        style: params?.style || "line"
       }
     });
     return res.data;

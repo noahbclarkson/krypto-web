@@ -275,10 +275,21 @@ struct PortfolioPoint {
     total_equity: f64,
 }
 
+#[derive(serde::Serialize, sqlx::FromRow)]
+struct PortfolioCandle {
+    #[sqlx(rename = "bucket_time")]
+    time: DateTime<Utc>,
+    open: f64,
+    high: f64,
+    low: f64,
+    close: f64,
+}
+
 #[derive(serde::Deserialize)]
 struct PortfolioQuery {
     range_days: Option<i64>,
     interval: Option<String>,
+    style: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -296,17 +307,56 @@ async fn get_portfolio_history(
     query: web::Query<PortfolioQuery>,
 ) -> Result<impl Responder, AppError> {
     let range_days = query.range_days.unwrap_or(7).max(1);
+    let style = query.style.as_deref().unwrap_or("line");
 
     let step_seconds = match query.interval.as_deref().unwrap_or("15m") {
+        "1m" => 60,
         "3m" => 180,
+        "5m" => 300,
         "15m" => 900,
+        "30m" => 1800,
         "1h" => 3600,
         "4h" => 14400,
+        "12h" => 43200,
         "1d" => 86400,
         _ => 900,
     };
 
     let start_ts = Utc::now() - chrono::Duration::days(range_days);
+
+    if style == "candle" {
+        let sql = r#"
+            SELECT
+                to_timestamp(floor(extract(epoch from timestamp) / $2) * $2) as bucket_time,
+                (array_agg(total_equity ORDER BY timestamp ASC))[1] as open,
+                MAX(total_equity) as high,
+                MIN(total_equity) as low,
+                (array_agg(total_equity ORDER BY timestamp DESC))[1] as close
+            FROM portfolio_cache
+            WHERE timestamp >= $1
+            GROUP BY 1
+            ORDER BY 1 ASC
+        "#;
+
+        let recs = sqlx::query_as::<_, PortfolioCandle>(sql)
+            .bind(start_ts)
+            .bind(step_seconds as f64)
+            .fetch_all(pool.get_ref())
+            .await?;
+
+        let candles: Vec<CandleBar> = recs
+            .into_iter()
+            .map(|c| CandleBar {
+                time: c.time.to_rfc3339(),
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close,
+            })
+            .collect();
+
+        return Ok(HttpResponse::Ok().json(candles));
+    }
 
     let sql = r#"
         SELECT timestamp, total_equity
