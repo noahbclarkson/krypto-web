@@ -200,7 +200,7 @@ export function StrategyList() {
                             contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', fontSize: '12px' }}
                             itemStyle={{ color: '#10b981' }}
                             labelStyle={{ display: 'none' }}
-                            formatter={(value: number) => [`${value.toFixed(2)}`, 'Equity']}
+                            formatter={(value) => [`${(value as number)?.toFixed(2) ?? 'N/A'}`, 'Equity']}
                         />
                         <YAxis
                             hide={false}

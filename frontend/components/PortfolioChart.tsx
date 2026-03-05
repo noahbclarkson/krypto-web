@@ -120,7 +120,7 @@ export function PortfolioChart() {
               <Tooltip
                 contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }}
                 labelFormatter={(v) => new Date(v).toLocaleString()}
-                formatter={(value: number) => [`${value.toFixed(2)}`, "Total Equity"]}
+                formatter={(value) => [`${(value as number)?.toFixed(2) ?? 'N/A'}`, "Total Equity"]}
               />
               <Area
                 type="monotone"
