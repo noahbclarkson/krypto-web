@@ -29,8 +29,10 @@ export function PortfolioChart() {
     );
   }
 
-  const isLineData = (d: any[]): d is PortfolioPoint[] => chartType === "line" && "total_equity" in d[0];
-  const isCandleData = (d: any[]): d is Candle[] => chartType === "candle" && "open" in d[0];
+  const isLineData = (d: unknown[]): d is PortfolioPoint[] =>
+    chartType === "line" && d.length > 0 && typeof d[0] === "object" && d[0] !== null && "total_equity" in d[0];
+  const isCandleData = (d: unknown[]): d is Candle[] =>
+    chartType === "candle" && d.length > 0 && typeof d[0] === "object" && d[0] !== null && "open" in d[0];
 
   return (
     <Card className="bg-slate-900 border-slate-800 h-full flex flex-col">

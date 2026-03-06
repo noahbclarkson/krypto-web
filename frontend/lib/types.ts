@@ -5,7 +5,7 @@ export interface Strategy {
   symbol: string;
   interval: string;
   // We treat parameters as a generic object since they vary per strategy
-  parameters: Record<string, any>;
+  parameters: Record<string, number | string | boolean>;
   performance_metrics: {
     sharpe: number;
     win_rate: number;

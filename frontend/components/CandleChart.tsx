@@ -93,15 +93,17 @@ export const CandleChart = ({ data, colors = {} }: Props) => {
             seriesRef.current = null;
             hasFitRef.current = false;
         };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Apply theme changes
+    // Apply theme changes — intentionally re-runs only when these specific props change
     useEffect(() => {
         if (!chartRef.current) return;
+        const { backgroundColor, textColor } = colors;
         chartRef.current.applyOptions({
             layout: {
-                background: { type: ColorType.Solid, color: colors.backgroundColor || '#020617' },
-                textColor: colors.textColor || '#94a3b8',
+                background: { type: ColorType.Solid, color: backgroundColor || '#020617' },
+                textColor: textColor || '#94a3b8',
             },
         });
         seriesRef.current?.applyOptions({
@@ -111,9 +113,10 @@ export const CandleChart = ({ data, colors = {} }: Props) => {
             wickUpColor: '#22c55e',
             wickDownColor: '#ef4444',
         });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [colors.backgroundColor, colors.textColor]);
 
-    // Stream new data without resetting zoom
+    // Stream new data without resetting zoom — seriesRef/chartRef are stable refs, not deps
     useEffect(() => {
         if (!seriesRef.current || !chartRef.current) return;
 

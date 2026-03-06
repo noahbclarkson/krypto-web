@@ -9,6 +9,7 @@ import { PortfolioChart } from "@/components/PortfolioChart";
 import { RiskMetricsCard } from "@/components/RiskMetricsCard";
 import { Card, CardContent } from "@/components/ui/card";
 import { TrendingUp, DollarSign, Activity } from "lucide-react";
+import { PortfolioPoint } from "@/lib/types";
 
 export default function Home() {
   const { data: sessions } = useQuery({
@@ -25,8 +26,8 @@ export default function Home() {
 
   const isTrading = sessions && sessions.length > 0;
 
-  const isLineData = (data: any): data is Array<{ timestamp: string; total_equity: number }> => {
-    return data && data.length > 0 && 'total_equity' in data[0];
+  const isLineData = (data: unknown): data is PortfolioPoint[] => {
+    return Array.isArray(data) && data.length > 0 && 'total_equity' in data[0];
   };
 
   const latestEquity = portfolioHistory && isLineData(portfolioHistory)

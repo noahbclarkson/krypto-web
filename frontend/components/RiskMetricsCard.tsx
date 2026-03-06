@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ShieldAlert, TrendingDown, Wallet, Activity } from "lucide-react";
+import { PortfolioPoint } from "@/lib/types";
 
 function calculateMaxDrawdown(equityCurve: { total_equity: number }[]): number {
   if (!equityCurve || equityCurve.length === 0) return 0;
@@ -66,8 +67,8 @@ export function RiskMetricsCard() {
     refetchInterval: 5000
   });
 
-  const isLineData = (data: any): data is { total_equity: number }[] => {
-    return data && data.length > 0 && 'total_equity' in data[0];
+  const isLineData = (data: unknown): data is PortfolioPoint[] => {
+    return Array.isArray(data) && data.length > 0 && 'total_equity' in data[0];
   };
 
   if (!portfolioHistory || portfolioHistory.length === 0 || !isLineData(portfolioHistory)) {

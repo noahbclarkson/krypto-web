@@ -47,7 +47,7 @@ export function Generator() {
       });
       queryClient.invalidateQueries({ queryKey: ["strategies"] });
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       toast.error("Optimization Failed", {
         description: error.message,
       });

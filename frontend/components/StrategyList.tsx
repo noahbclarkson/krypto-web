@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Rocket, Trash2, Eye } from "lucide-react";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -23,17 +22,23 @@ export function StrategyList() {
 
   const activeSessions = (sessions || []).filter((s) => s.status === "active");
   const isTrading = activeSessions.length > 0;
+
+  // Track if user has manually changed selection
+  const [userHasSelected, setUserHasSelected] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [totalCapital, setTotalCapital] = useState(10000);
   const [resetOpen, setResetOpen] = useState(false);
 
-  useEffect(() => {
-    if (strategies && !isTrading) {
-      setSelectedIds(new Set(strategies.map((s) => s.id)));
-    }
-  }, [strategies, isTrading]);
+  // When not trading and strategies load, auto-select all if user hasn't made manual selections
+  const allStrategyIds = useMemo(() => {
+    return strategies ? new Set(strategies.map((s) => s.id)) : new Set();
+  }, [strategies]);
+
+  // Sync selection with all strategies when not trading and user hasn't interacted
+  const effectiveSelectedIds = (!isTrading && !userHasSelected) ? allStrategyIds : selectedIds;
 
   const toggleSelection = (id: string) => {
+    setUserHasSelected(true);
     const newSet = new Set(selectedIds);
     if (newSet.has(id)) newSet.delete(id);
     else newSet.add(id);
@@ -42,7 +47,7 @@ export function StrategyList() {
 
   const deployPortfolio = useMutation({
     mutationFn: async () => {
-      const selectedStrats = strategies?.filter(s => selectedIds.has(s.id)) || [];
+      const selectedStrats = strategies?.filter(s => effectiveSelectedIds.has(s.id)) || [];
 
       const totalKelly = selectedStrats.reduce((sum, s) => sum + (s.kelly_fraction || 0.1), 0);
       const leverageRatio = totalKelly > 1.0 ? 1.0 / totalKelly : 1.0;
@@ -58,8 +63,9 @@ export function StrategyList() {
       await Promise.all(promises);
     },
     onSuccess: () => {
-      toast.success("Portfolio Deployed", { description: `Deployed ${selectedIds.size} strategies.` });
+      toast.success("Portfolio Deployed", { description: `Deployed ${effectiveSelectedIds.size} strategies.` });
       setSelectedIds(new Set());
+      setUserHasSelected(false);
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     }
   });
@@ -101,7 +107,7 @@ export function StrategyList() {
     );
   }
 
-  const selectedStrats = strategies?.filter(s => selectedIds.has(s.id)) || [];
+  const selectedStrats = strategies?.filter(s => effectiveSelectedIds.has(s.id)) || [];
   const totalKelly = selectedStrats.reduce((sum, s) => sum + (s.kelly_fraction || 0.1), 0);
 
   return (
@@ -134,7 +140,7 @@ export function StrategyList() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {strategies.map((strat) => {
-          const isSelected = !isTrading && selectedIds.has(strat.id);
+          const isSelected = !isTrading && effectiveSelectedIds.has(strat.id);
           return (
             <Card
                 key={strat.id}
@@ -160,7 +166,7 @@ export function StrategyList() {
                 <div className="flex items-start gap-2">
                     {!isTrading && (
                       <Checkbox
-                          checked={selectedIds.has(strat.id)}
+                          checked={effectiveSelectedIds.has(strat.id)}
                           onClick={(e) => e.stopPropagation()}
                           className="mt-1"
                       />
@@ -260,13 +266,13 @@ export function StrategyList() {
         })}
       </div>
 
-      {!isTrading && selectedIds.size > 0 && (
+      {!isTrading && effectiveSelectedIds.size > 0 && (
         <div className="fixed bottom-0 left-0 right-0 bg-slate-900/90 backdrop-blur border-t border-slate-800 p-4 z-50">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
                 <div className="flex items-center gap-6">
                     <div>
                         <div className="text-xs text-slate-400 uppercase font-bold">Selected</div>
-                        <div className="text-2xl font-bold">{selectedIds.size}</div>
+                        <div className="text-2xl font-bold">{effectiveSelectedIds.size}</div>
                     </div>
                     <div>
                         <div className="text-xs text-slate-400 uppercase font-bold">Effective Leverage</div>
