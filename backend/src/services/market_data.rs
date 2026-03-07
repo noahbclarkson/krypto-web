@@ -1,15 +1,20 @@
+//! Market data fetching from Binance REST API.
+
 use binance::{api::Binance, market::Market, rest_model::KlineSummaries};
 use chrono::{DateTime, Utc};
 use polars::prelude::*;
 
 use crate::error::AppError;
 
+/// Thin wrapper around the Binance market REST client.
 pub struct MarketDataService {
     market: Market,
 }
 
+/// A single OHLCV candlestick bar.
 #[derive(Clone, Debug)]
 pub struct CandleBar {
+    /// Open time as Unix timestamp in milliseconds.
     pub time: i64,
     pub open: f64,
     pub high: f64,
@@ -18,11 +23,15 @@ pub struct CandleBar {
 }
 
 impl MarketDataService {
+    /// Create a new service.  API keys are optional for public market data.
     pub fn new(api_key: Option<String>, secret_key: Option<String>) -> Self {
         let market: Market = Binance::new(api_key, secret_key);
         Self { market }
     }
 
+    /// Fetch the most recent `limit` OHLCV candles as a Polars [`DataFrame`].
+    ///
+    /// Columns: `time`, `open`, `high`, `low`, `close`, `volume`.
     pub async fn fetch_candles(
         &self,
         symbol: &str,
@@ -69,6 +78,10 @@ impl MarketDataService {
         Ok(df)
     }
 
+    /// Fetch the most recent `limit` candles as a `Vec<CandleBar>`.
+    ///
+    /// Lighter than [`fetch_candles`](Self::fetch_candles) when a full
+    /// DataFrame is not required (e.g. live charting endpoint).
     pub async fn fetch_candles_vec(
         &self,
         symbol: &str,

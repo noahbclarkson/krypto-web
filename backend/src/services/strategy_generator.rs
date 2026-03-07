@@ -1,3 +1,9 @@
+//! Strategy generation via genetic algorithm optimisation.
+//!
+//! Fetches OHLCV data, adds technical features, then runs an [`Optimizer`]
+//! over each strategy type's parameter space.  Top-N candidates by Sharpe
+//! ratio are persisted to the `strategies` table.
+
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -15,11 +21,13 @@ use tracing::{error, info};
 
 use crate::services::market_data::MarketDataService;
 
+/// Generates optimised strategies and persists the best ones to the database.
 pub struct StrategyGenerator {
     pool: PgPool,
     market: Arc<MarketDataService>,
 }
 
+/// Internal candidate produced by a single optimisation run.
 struct Candidate {
     symbol: String,
     interval: String,
@@ -30,10 +38,25 @@ struct Candidate {
 }
 
 impl StrategyGenerator {
+    /// Create a new generator backed by the given pool and market data service.
     pub fn new(pool: PgPool, market: Arc<MarketDataService>) -> Self {
         Self { pool, market }
     }
 
+    /// Run the optimiser over all `symbols × intervals × strategy_types` and
+    /// save the best `top_n` strategies ranked by Sharpe ratio.
+    ///
+    /// # Arguments
+    ///
+    /// * `symbols` - Ticker symbols to optimise (e.g. `["BTCUSDT"]`)
+    /// * `intervals` - Candle intervals to optimise (e.g. `["1h", "4h"]`)
+    /// * `top_n` - Maximum number of strategies to persist
+    /// * `limit` - Number of candles to fetch per symbol/interval
+    /// * `iterations` - Genetic algorithm generations per strategy type
+    ///
+    /// # Returns
+    ///
+    /// Number of strategies saved to the database.
     pub async fn generate_and_save(
         &self,
         symbols: Vec<String>,
@@ -202,6 +225,11 @@ impl StrategyGenerator {
         Ok(saved_count)
     }
 
+    /// Optimise a single strategy type against `df` and push any viable
+    /// candidates into `candidates`.
+    ///
+    /// A candidate is considered viable if it has more than 10 trades and a
+    /// positive total return.
     fn evaluate_type<S>(
         &self,
         optimizer: &Optimizer,
