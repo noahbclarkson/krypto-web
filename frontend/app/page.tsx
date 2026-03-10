@@ -19,8 +19,8 @@ export default function Home() {
   });
 
   const { data: portfolioHistory } = useQuery({
-    queryKey: ["portfolio_history", 7, "15m", "line"],
-    queryFn: () => api.getPortfolioHistory({ rangeDays: 7, interval: "15m", style: "line" }),
+    queryKey: ["portfolio_history", 1, "15m", "line"],
+    queryFn: () => api.getPortfolioHistory({ rangeDays: 1, interval: "15m", style: "line" }),
     refetchInterval: 5000
   });
 

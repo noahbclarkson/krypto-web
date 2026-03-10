@@ -67,6 +67,9 @@ export function StrategyList() {
       setSelectedIds(new Set());
       setUserHasSelected(false);
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (error: Error) => {
+      toast.error("Deploy Failed", { description: error.message });
     }
   });
 
@@ -86,6 +89,9 @@ export function StrategyList() {
     onSuccess: () => {
       toast.info("Strategy Deleted");
       queryClient.invalidateQueries({ queryKey: ["strategies"] });
+    },
+    onError: (error: Error) => {
+      toast.error("Delete Failed", { description: error.message });
     }
   });
 
@@ -94,6 +100,9 @@ export function StrategyList() {
     onSuccess: () => {
       toast.warning("All Strategies Deleted");
       queryClient.invalidateQueries({ queryKey: ["strategies"] });
+    },
+    onError: (error: Error) => {
+      toast.error("Delete Failed", { description: error.message });
     }
   });
 
@@ -231,8 +240,8 @@ export function StrategyList() {
                 <div className="grid grid-cols-3 gap-2 text-xs mb-4 border-t border-slate-800 pt-3">
                 <div>
                     <div className="text-slate-500">Net PnL</div>
-                    <div className="text-green-400 font-mono font-bold">
-                        {strat.performance_metrics.total_return_pct.toFixed(1)}%
+                    <div className={`font-mono font-bold ${strat.performance_metrics.total_return_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {strat.performance_metrics.total_return_pct >= 0 ? '+' : ''}{strat.performance_metrics.total_return_pct.toFixed(1)}%
                     </div>
                 </div>
                 <div>

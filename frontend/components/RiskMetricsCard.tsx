@@ -91,12 +91,13 @@ export function RiskMetricsCard() {
   const var95 = calculateVaR(portfolioHistory, 0.95);
 
   const activeSessions = sessions?.filter(s => s.status === 'active') || [];
-  const totalInitial = activeSessions.reduce((sum, s) => sum + s.initial_capital, 0);
+  const totalCurrentEquity = activeSessions.reduce((sum, s) => sum + s.current_equity, 0);
   const totalExposure = activeSessions.reduce((sum, s) => {
     return sum + (s.current_position !== 0 ? s.current_equity : 0);
   }, 0);
-  const cashPct = totalInitial > 0 ? ((totalInitial - totalExposure) / totalInitial) * 100 : 0;
-  const exposurePct = totalInitial > 0 ? (totalExposure / totalInitial) * 100 : 0;
+  const totalCash = totalCurrentEquity - totalExposure;
+  const cashPct = totalCurrentEquity > 0 ? Math.max(0, (totalCash / totalCurrentEquity) * 100) : 0;
+  const exposurePct = totalCurrentEquity > 0 ? (totalExposure / totalCurrentEquity) * 100 : 0;
 
   return (
     <Card className="bg-slate-900 border-slate-800 h-full">
