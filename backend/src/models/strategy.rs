@@ -76,3 +76,106 @@ pub struct Trade {
     pub reason: Option<String>,
     pub timestamp: DateTime<Utc>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json;
+
+    #[test]
+    fn test_generate_strategies_request_full() {
+        let json = r#"{
+            "symbols": ["BTCUSDT", "ETHUSDT"],
+            "intervals": ["1h", "4h"],
+            "top_n": 10,
+            "limit": 1000,
+            "iterations": 50
+        }"#;
+
+        let req: GenerateStrategiesRequest =
+            serde_json::from_str(json).expect("Failed to deserialize");
+
+        assert_eq!(req.symbols, vec!["BTCUSDT", "ETHUSDT"]);
+        assert_eq!(req.intervals, vec!["1h", "4h"]);
+        assert_eq!(req.top_n, Some(10));
+        assert_eq!(req.limit, Some(1000));
+        assert_eq!(req.iterations, Some(50));
+    }
+
+    #[test]
+    fn test_generate_strategies_request_minimal() {
+        let json = r#"{
+            "symbols": ["BTCUSDT"],
+            "intervals": ["1h"]
+        }"#;
+
+        let req: GenerateStrategiesRequest =
+            serde_json::from_str(json).expect("Failed to deserialize");
+
+        assert_eq!(req.symbols, vec!["BTCUSDT"]);
+        assert_eq!(req.intervals, vec!["1h"]);
+        assert_eq!(req.top_n, None);
+    }
+
+    #[test]
+    fn test_create_session_request_full() {
+        let uuid_str = "550e8400-e29b-41d4-a716-446655440000";
+        let json = format!(
+            "{{
+                \"strategy_id\": \"{}\",
+                \"initial_capital\": 10000.0,
+                \"execution_mode\": \"paper\"
+            }}",
+            uuid_str
+        );
+
+        let req: CreateSessionRequest =
+            serde_json::from_str(&json).expect("Failed to deserialize");
+
+        assert_eq!(req.strategy_id, Uuid::parse_str(uuid_str).unwrap());
+        assert!((req.initial_capital - 10000.0).abs() < f64::EPSILON);
+        assert_eq!(req.execution_mode, Some("paper".to_string()));
+    }
+
+    #[test]
+    fn test_create_session_request_minimal() {
+        let uuid_str = "550e8400-e29b-41d4-a716-446655440000";
+        let json = format!(
+            "{{
+                \"strategy_id\": \"{}\",
+                \"initial_capital\": 5000.0
+            }}",
+            uuid_str
+        );
+
+        let req: CreateSessionRequest =
+            serde_json::from_str(&json).expect("Failed to deserialize");
+
+        assert_eq!(req.strategy_id, Uuid::parse_str(uuid_str).unwrap());
+        assert!((req.initial_capital - 5000.0).abs() < f64::EPSILON);
+        assert_eq!(req.execution_mode, None);
+    }
+
+    #[test]
+    fn test_create_strategy_request() {
+        let json = r#"{
+            "name": "Bollinger Reversion",
+            "strategy_type": "bollinger_reversion",
+            "symbol": "BTCUSDT",
+            "interval": "1h",
+            "parameters": {"period": 20, "std_dev": 2.0},
+            "performance_metrics": {"sharpe": 1.5, "win_rate": 0.55},
+            "backtest_curve": [[1.0, 10000.0], [2.0, 10200.0]]
+        }"#;
+
+        let req: CreateStrategyRequest =
+            serde_json::from_str(json).expect("Failed to deserialize");
+
+        assert_eq!(req.name, "Bollinger Reversion");
+        assert_eq!(req.strategy_type, "bollinger_reversion");
+        assert_eq!(req.symbol, "BTCUSDT");
+        assert_eq!(req.interval, "1h");
+        assert!(req.performance_metrics.is_some());
+        assert!(req.backtest_curve.is_some());
+    }
+}
